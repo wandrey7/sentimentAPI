@@ -1,40 +1,91 @@
 package com.hackaton_one.sentiment_api.service;
-
-import com.hackaton_one.sentiment_api.api.SentimentResponse;
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtSession;
+import com.hackaton_one.sentiment_api.exceptions.ModelAnalysisException;
+import com.hackaton_one.sentiment_api.exceptions.ModelInitializationException;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
 /**
- * Serviço responsável por executar (ou delegar) a lógica de análise de sentimento.
- * <p>
- * Atualmente implementa uma lógica mock/stub apenas para fins de exemplo.
+ * Serviço para realizar inferência de análise de sentimento
+ * utilizando um modelo ONNX com ONNX Runtime.
+ *
+ * Responsável por carregar o modelo ONNX, preparar os dados de entrada,
+ * executar a inferência e retornar os resultados.
  */
 @Service
 public class SentimentService {
+    private OrtEnvironment env;
+    private OrtSession session;
 
-    public SentimentResponse analyze(String text) {
-        if (text == null || text.isBlank()) {
-            // Esta validação normalmente é feita na camada de controller via Bean Validation,
-            // mas aqui garantimos um fallback defensivo.
-            throw new IllegalArgumentException("Texto para análise não pode ser nulo ou vazio.");
+    private static final String MODEL_PATH = "models/sentiment_model.onnx";
+
+    @PostConstruct
+    public void init() {
+        try {
+            // 1. Initialize ONNX Runtime environment
+            this.env = OrtEnvironment.getEnvironment();
+
+            // 2. Options for the session(Optimizations
+            OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
+            opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT);
+
+            byte[] modelBytes = new ClassPathResource(MODEL_PATH).getContentAsByteArray();
+
+            // 3. Load the model
+            this.session = env.createSession(modelBytes, opts);
+        } catch (Exception e) {
+            throw new ModelInitializationException("Failed to load the ONNX model: " + e.getMessage(), e);
         }
+    }
 
-        // Lógica mock de sentimento: apenas como exemplo simples.
-        String lower = text.toLowerCase();
-        String sentiment;
-        double score;
+    // TODO: Add DTO
+    public float[] analyze(String text) {
+        String[] inputData = new String[]{ text };
+        long[] shape = new long[]{ 1, 1 };
 
-        if (lower.contains("bom") || lower.contains("good") || lower.contains("ótimo") || lower.contains("excelente")) {
-            sentiment = "POSITIVE";
-            score = 0.9;
-        } else if (lower.contains("ruim") || lower.contains("bad") || lower.contains("péssimo") || lower.contains("horrível")) {
-            sentiment = "NEGATIVE";
-            score = 0.1;
-        } else {
-            sentiment = "NEUTRAL";
-            score = 0.5;
+        String inputName = session.getInputNames().iterator().next();
+
+        try (OnnxTensor tensor = OnnxTensor.createTensor(env, inputData, shape)) {
+            Map<String, OnnxTensor> inputs = Collections.singletonMap(inputName, tensor);
+
+            // 5. Run inference
+            try (OrtSession.Result results = session.run(inputs)) {
+                // 6. Extract output
+                String[] labels = (String[]) results.get(0).getValue();
+                String predict = labels[0];
+
+                @SuppressWarnings("unchecked")
+                List<Map<String, Float>> probsList = (List<Map<String, Float>>) results.get(1).getValue();
+
+                Map<String, Float> mapProbability = probsList.get(0);
+                float probability = mapProbability.get(predict);
+
+//                return new SentimentResponse(predict, (double) probability);
+                return new float[]{ probability };
+            } catch (Exception e){
+                throw new ModelAnalysisException("Failed to run inference: " + e.getMessage(), e);
+            }
+        } catch (Exception e){
+            throw new ModelAnalysisException("Failed to prepare tensor for inference: " + e.getMessage(), e);
         }
+    }
 
-        return new SentimentResponse(sentiment, score, text);
+    @PreDestroy
+    public void cleanup(){
+        try {
+            if (session != null) session.close();
+            if (env != null) env.close();
+        } catch (Exception e){
+            e.printStackTrace();
+        }
     }
 }
 

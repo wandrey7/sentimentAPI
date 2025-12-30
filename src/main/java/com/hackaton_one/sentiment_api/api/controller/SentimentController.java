@@ -6,11 +6,9 @@ import com.hackaton_one.sentiment_api.api.dto.SentimentResponseDTO;
 import com.hackaton_one.sentiment_api.service.BatchService;
 import com.hackaton_one.sentiment_api.service.SentimentService;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindingResult;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,8 +16,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Controller principal da API de análise de sentimento.
@@ -28,6 +24,7 @@ import java.util.Map;
  * - POST /sentiment (texto único)
  * - POST /sentiment/batch (CSV em lote)
  */
+@Slf4j
 @RestController
 @RequestMapping("/sentiment")
 public class SentimentController {
@@ -44,41 +41,18 @@ public class SentimentController {
      * POST /sentiment - Análise de texto único.
      */
     @PostMapping
-    public ResponseEntity<?> analyzeSentiment(
-            @Valid @RequestBody SentimentRequestDTO request,
-            BindingResult bindingResult) {
-        
-        try {
-            if (bindingResult.hasErrors()) {
-                String errorMessage = "Invalid input data";
-                
-                FieldError firstError = bindingResult.getFieldErrors().stream()
-                    .findFirst()
-                    .orElse(null);
-                
-                if (firstError != null) {
-                    errorMessage = firstError.getDefaultMessage() != null ? 
-                        firstError.getDefaultMessage() : 
-                        "Field '" + firstError.getField() + "' is invalid";
-                }
-                
-                return errorResponse(errorMessage, HttpStatus.BAD_REQUEST);
-            }
-            
-            // Usa o serviço para fazer a análise real
-            var result = sentimentService.analyze(request.text());
-            
-            return ResponseEntity.ok(
-                    new SentimentResponseDTO(
-                        result.previsao().toUpperCase(),
-                        result.probabilidade(),
-                        request.text()
-                    )
-            );
-            
-        } catch (Exception e) {
-            return errorResponse("Error processing request: " + e.getMessage(), HttpStatus.BAD_REQUEST);
-        }
+    public ResponseEntity<SentimentResponseDTO> analyzeSentiment(
+            @Valid @RequestBody SentimentRequestDTO request) {
+
+        var result = sentimentService.analyze(request.text());
+
+        return ResponseEntity.ok(
+                new SentimentResponseDTO(
+                    result.previsao().toUpperCase(),
+                    result.probabilidade(),
+                    request.text()
+                )
+        );
     }
 
     /**
@@ -88,38 +62,25 @@ public class SentimentController {
      * @param textColumn Nome da coluna com textos (opcional)
      */
     @PostMapping(value = "/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> analyzeBatchCSV(
+    public ResponseEntity<BatchSentimentResponseDTO> analyzeBatchCSV(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "textColumn", required = false) String textColumn) {
         
-        try {
-            if (file.isEmpty()) {
-                return errorResponse("CSV file is required", HttpStatus.BAD_REQUEST);
-            }
-            
-            String filename = file.getOriginalFilename();
-            if (filename == null || !filename.toLowerCase().endsWith(".csv")) {
-                return errorResponse("File must have .csv extension", HttpStatus.BAD_REQUEST);
-            }
-            
-            BatchSentimentResponseDTO response = batchService.processCSV(file, textColumn);
-            
-            if (response.totalProcessed() == 0) {
-                return errorResponse("No valid text found in CSV", HttpStatus.BAD_REQUEST);
-            }
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (IllegalArgumentException e) {
-            return errorResponse(e.getMessage(), HttpStatus.BAD_REQUEST);
-        } catch (Exception e) {
-            return errorResponse("Error processing CSV: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("CSV file is required");
         }
-    }
 
-    private ResponseEntity<Map<String, String>> errorResponse(String message, HttpStatus status) {
-        Map<String, String> error = new HashMap<>();
-        error.put("message", message);
-        return ResponseEntity.status(status).body(error);
+        String filename = file.getOriginalFilename();
+        if (filename == null || !filename.toLowerCase().endsWith(".csv")) {
+            throw new IllegalArgumentException("File must have .csv extension");
+        }
+
+        BatchSentimentResponseDTO response = batchService.processCSV(file, textColumn);
+
+        if (response.totalProcessed() == 0) {
+            throw new IllegalArgumentException("No valid text found in CSV");
+        }
+
+        return ResponseEntity.ok(response);
     }
 }

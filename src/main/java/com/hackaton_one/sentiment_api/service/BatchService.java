@@ -3,6 +3,7 @@ package com.hackaton_one.sentiment_api.service;
 import com.hackaton_one.sentiment_api.api.dto.BatchSentimentResponseDTO;
 import com.hackaton_one.sentiment_api.api.dto.SentimentResponseDTO;
 import com.hackaton_one.sentiment_api.api.dto.SentimentResultDTO;
+import com.hackaton_one.sentiment_api.exceptions.CsvProcessingException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -33,9 +34,9 @@ public class BatchService {
      * @param file Arquivo CSV com os textos
      * @param textColumn Nome da coluna com textos (opcional, usa primeira coluna se null)
      * @return BatchSentimentResponseDTO com resultados
-     * @throws Exception em caso de erro de leitura ou parsing
+     * @throws CsvProcessingException em caso de erro de leitura ou parsing
      */
-    public BatchSentimentResponseDTO processCSV(MultipartFile file, String textColumn) throws Exception {
+    public BatchSentimentResponseDTO processCSV(MultipartFile file, String textColumn) {
         List<SentimentResponseDTO> results = new ArrayList<>();
         
         try (BufferedReader reader = new BufferedReader(
@@ -86,6 +87,8 @@ public class BatchService {
                 results.add(new SentimentResponseDTO(result.previsao(), result.probabilidade(), text));
                 lineCount++;
             }
+        } catch (Exception e) {
+            throw new CsvProcessingException("Error processing CSV file: " + e.getMessage(), e);
         }
         
         return new BatchSentimentResponseDTO(results, results.size());

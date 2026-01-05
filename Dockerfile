@@ -38,6 +38,17 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
+# Create non-privileged user following Docker best practices
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    appuser
+
 WORKDIR /app
 
 COPY --from=build --chown=appuser:appuser /app/target/*.jar app.jar
